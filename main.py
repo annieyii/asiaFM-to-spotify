@@ -11,9 +11,11 @@ Asia FM → Spotify
 
 import argparse
 import csv
+import json
 import os
 import sys
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -22,11 +24,30 @@ from src.scraper import scrape
 load_dotenv()
 
 TODAY = date.today()
+PENDING_FILE = Path(".pending_songs.json")
 
 
-def parse_date(s: str) -> date:
-    return datetime.strptime(s, "%Y-%m-%d").date()
+# ── pending file ──────────────────────────────────────────────
 
+def save_pending(songs: list[dict], output: dict) -> None:
+    PENDING_FILE.write_text(
+        json.dumps({"songs": songs, "output": output}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_pending() -> tuple[list[dict], dict] | None:
+    if not PENDING_FILE.exists():
+        return None
+    data = json.loads(PENDING_FILE.read_text(encoding="utf-8"))
+    return data["songs"], data["output"]
+
+
+def clear_pending() -> None:
+    PENDING_FILE.unlink(missing_ok=True)
+
+
+# ── interactive helpers ───────────────────────────────────────
 
 def ask(prompt: str, default: str = "") -> str:
     hint = f" [{default}]" if default else ""
@@ -73,6 +94,13 @@ def ask_dates() -> tuple[date, date]:
     return start, end
 
 
+def ask_time_range() -> tuple[str | None, str | None]:
+    print("\n時間範圍（直接 Enter 代表全天）:")
+    t_start = ask("開始時間 HH:MM", "") or None
+    t_end = ask("結束時間 HH:MM", "") or None
+    return t_start, t_end
+
+
 def ask_output(stations: list[str], start: date, end: date) -> dict:
     print("\n輸出方式:")
     print("  1) 加入現有 Spotify 歌單")
@@ -95,6 +123,12 @@ def ask_output(stations: list[str], start: date, end: date) -> dict:
     return {"mode": "spotify", "name": name, "public": False}
 
 
+# ── spotify helpers ───────────────────────────────────────────
+
+def parse_date(s: str) -> date:
+    return datetime.strptime(s, "%Y-%m-%d").date()
+
+
 def export_csv(songs: list[dict], path: str) -> None:
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=["title", "artist"])
@@ -113,19 +147,20 @@ def get_spotify_client():
     return get_client()
 
 
-def run_spotify_new(songs: list[dict], name: str, public: bool) -> None:
-    from src.spotify_client import create_playlist
-    print(f"\n連線 Spotify，建立歌單:「{name}」")
-    url = create_playlist(get_spotify_client(), name, songs, public=public)
-    print(f"\n歌單已建立: {url}")
-
-
-def run_spotify_add(songs: list[dict], playlist_id: str) -> None:
-    from src.spotify_client import add_to_playlist
-    print("\n連線 Spotify，加入歌單...")
-    url = add_to_playlist(get_spotify_client(), playlist_id, songs)
+def run_spotify(songs: list[dict], output: dict) -> None:
+    from src.spotify_client import add_to_playlist, create_playlist
+    sp = get_spotify_client()
+    if output["mode"] == "add":
+        print("\n連線 Spotify，加入歌單...")
+        url = add_to_playlist(sp, output["playlist_id"], songs)
+    else:
+        print(f"\n連線 Spotify，建立歌單:「{output['name']}」")
+        url = create_playlist(sp, output["name"], songs, public=output["public"])
+    clear_pending()
     print(f"\n完成: {url}")
 
+
+# ── main ──────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -135,22 +170,40 @@ def main() -> None:
     parser.add_argument("--start", type=parse_date, default=None, help="開始日期 YYYY-MM-DD")
     parser.add_argument("--end", type=parse_date, default=None, help="結束日期 YYYY-MM-DD")
     parser.add_argument("--stations", nargs="+", choices=["asia", "pacific"], default=None)
+    parser.add_argument("--time-start", default=None, metavar="HH:MM", help="只抓此時間之後的時段")
+    parser.add_argument("--time-end", default=None, metavar="HH:MM", help="只抓此時間之前的時段")
     parser.add_argument("--export", metavar="FILE.csv", help="只匯出 CSV")
     parser.add_argument("--playlist-id", default=None, help="加入現有歌單（ID 或網址）")
     parser.add_argument("--playlist-name", default=None, help="建立新歌單時的名稱")
     parser.add_argument("--private", action="store_true", help="建立私人歌單（預設即私人）")
     args = parser.parse_args()
 
-    # Interactive mode when --start is omitted
+    # ── 檢查是否有未完成的任務 ──
+    pending = load_pending()
+    if pending:
+        songs, output = pending
+        print(f"找到上次未完成的 {len(songs)} 首歌。")
+        choice = ask("要繼續加入 Spotify 歌單嗎？(y/n)", "y")
+        if choice.lower() == "y":
+            run_spotify(songs, output)
+            return
+        else:
+            clear_pending()
+            print("已清除，重新開始。\n")
+
+    # ── 互動模式 ──
     if args.start is None:
         print("=== Asia FM → Spotify ===")
         stations = ask_stations()
         start, end = ask_dates()
+        time_start, time_end = ask_time_range()
         output = ask_output(stations, start, end)
     else:
         stations = args.stations or ["asia", "pacific"]
         start = args.start
         end = args.end or args.start
+        time_start = args.time_start
+        time_end = args.time_end
         if args.export:
             output = {"mode": "csv", "path": args.export}
         elif args.playlist_id:
@@ -164,7 +217,7 @@ def main() -> None:
             }
 
     print()
-    songs = scrape(stations, start, end)
+    songs = scrape(stations, start, end, time_start=time_start, time_end=time_end)
 
     if not songs:
         print("沒有抓到任何歌曲，結束。")
@@ -172,10 +225,11 @@ def main() -> None:
 
     if output["mode"] == "csv":
         export_csv(songs, output["path"])
-    elif output["mode"] == "add":
-        run_spotify_add(songs, output["playlist_id"])
-    else:
-        run_spotify_new(songs, output["name"], output["public"])
+        return
+
+    # 存成 pending，確保 Spotify 搜尋中斷也不會遺失歌單
+    save_pending(songs, output)
+    run_spotify(songs, output)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 從[亞洲電台](https://www.asiafm.com.tw/)抓取播放歌曲，自動加入 Spotify 歌單。
 
-支援亞洲電台 FM92.7 與亞太電台 FM92.3，可指定任意日期範圍。
+支援亞洲電台 FM92.7 與亞太電台 FM92.3，可指定任意日期與時間範圍。
 
 ## 安裝
 
@@ -44,7 +44,7 @@ SPOTIFY_PLAYLIST_ID=https://open.spotify.com/playlist/...
 uv run main.py
 ```
 
-依提示選擇電台、日期、輸出方式，直接按 Enter 套用預設值。
+依提示選擇電台、日期、時間範圍、輸出方式，直接按 Enter 套用預設值。
 
 ```
 === Asia FM → Spotify ===
@@ -59,9 +59,13 @@ uv run main.py
 開始日期 (YYYY-MM-DD) [2026-05-11]:
 結束日期 (YYYY-MM-DD) [2026-05-17]:
 
+時間範圍（直接 Enter 代表全天）:
+開始時間 HH:MM:
+結束時間 HH:MM:
+
 輸出方式:
   1) 加入現有 Spotify 歌單
-  2) 建立新 Spotify 歌單（私人）
+  2) 建立新 Spotify 歌單
   3) 匯出 CSV 檔案
 請選擇 [1]:
 ```
@@ -72,8 +76,8 @@ uv run main.py
 # 加入現有歌單
 uv run main.py --start 2026-05-10 --end 2026-05-17 --playlist-id https://open.spotify.com/playlist/xxx
 
-# 建立新私人歌單
-uv run main.py --start 2026-05-17 --stations asia
+# 只抓早上時段，建立新歌單
+uv run main.py --start 2026-05-17 --time-start 06:00 --time-end 12:00
 
 # 只匯出 CSV（不需要 Spotify 帳號）
 uv run main.py --start 2026-05-17 --export songs.csv
@@ -84,9 +88,22 @@ uv run main.py --start 2026-05-17 --export songs.csv
 | `--start` | 開始日期 `YYYY-MM-DD` |
 | `--end` | 結束日期（預設同 `--start`） |
 | `--stations` | `asia` / `pacific` / 兩個都不填代表全選 |
+| `--time-start` | 只抓此時間之後的時段（格式 `HH:MM`） |
+| `--time-end` | 只抓此時間之前的時段（格式 `HH:MM`） |
 | `--playlist-id` | 加入現有歌單（ID 或完整網址） |
 | `--playlist-name` | 建立新歌單時的名稱 |
 | `--export` | 只輸出 CSV，不操作 Spotify |
+
+### 中途中斷與續跑
+
+抓完電台歌單後，程式會先把歌曲存到本地 `.pending_songs.json`，再開始 Spotify 搜尋。若中途遇到 rate limit 或手動中斷，下次執行時會自動詢問是否繼續：
+
+```
+找到上次未完成的 480 首歌。
+要繼續加入 Spotify 歌單嗎？(y/n) [y]:
+```
+
+搜尋結果也會快取在 `.song_cache.json`，重複出現的歌不會重複呼叫 API。
 
 ## 檔案結構
 
@@ -103,5 +120,5 @@ asiaFM-to-spotify/
 ## 運作原理
 
 1. 直接呼叫亞洲電台網站的 WordPress AJAX endpoint 抓取每個時段的播放清單
-2. 對每首歌在 Spotify 搜尋（先用精確搜尋，找不到再用模糊搜尋）
+2. 對每首歌在 Spotify 搜尋（先用精確搜尋，找不到再用模糊搜尋），結果快取在本地
 3. 以每批 100 首的方式加入歌單（Spotify API 上限）

@@ -12,6 +12,8 @@ wheels/
 # Secrets
 .env
 .spotify_cache
+.song_cache.json
+.pending_songs.json
 
 # Claude files
 .claude

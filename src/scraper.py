@@ -57,29 +57,56 @@ def fetch_slot(radio_type: str, search_date: str, interval: str) -> list[dict]:
     return []
 
 
+def _filter_slots(time_start: str | None, time_end: str | None) -> list[str]:
+    """Return only slots that overlap with [time_start, time_end] (HH:MM format)."""
+    if not time_start and not time_end:
+        return TIME_SLOTS
+
+    def to_hour(t: str) -> int:
+        return int(t.split(":")[0])
+
+    h_start = to_hour(time_start) if time_start else 0
+    h_end = to_hour(time_end) if time_end else 24
+
+    result = []
+    for slot in TIME_SLOTS:
+        s, e = slot.split("-")
+        slot_start = to_hour(s)
+        slot_end = to_hour(e) if to_hour(e) != 0 else 24
+        if slot_start < h_end and slot_end > h_start:
+            result.append(slot)
+    return result
+
+
 def scrape(
     stations: list[str],
     start: date,
     end: date,
+    time_start: str | None = None,
+    time_end: str | None = None,
     delay: float = 0.3,
 ) -> list[dict]:
     """
     Scrape songs for given station keys ('asia', 'pacific') and date range.
+    time_start / time_end: optional HH:MM strings to limit time of day.
     Returns deduplicated list of {title, artist} dicts.
     """
+    slots = _filter_slots(time_start, time_end)
+    time_label = f" {time_start}~{time_end}" if time_start or time_end else ""
+
     seen: set[tuple[str, str]] = set()
     songs: list[dict] = []
 
     for station_key in stations:
         radio_type = STATIONS[station_key]
         station_name = "亞洲FM92.7" if station_key == "asia" else "亞太FM92.3"
-        print(f"\n[{station_name}]")
+        print(f"\n[{station_name}{time_label}]")
 
         for d in date_range(start, end):
             date_str = d.strftime("%Y-%m-%d")
             print(f"  {date_str} ...", end=" ", flush=True)
             count = 0
-            for slot in TIME_SLOTS:
+            for slot in slots:
                 for song in fetch_slot(radio_type, date_str, slot):
                     key = (song["title"].strip(), song["artist"].strip())
                     if key not in seen:

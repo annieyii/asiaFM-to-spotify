@@ -1,8 +1,10 @@
 """Spotify API wrapper — search tracks and build playlists."""
 
+import csv
 import json
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 
 import spotipy
@@ -10,6 +12,7 @@ from spotipy.oauth2 import SpotifyOAuth
 
 SCOPE = "playlist-modify-public playlist-modify-private"
 CACHE_FILE = Path(".song_cache.json")
+NOT_FOUND_FILE = Path("not_found_songs.csv")
 
 
 def get_client() -> spotipy.Spotify:
@@ -34,30 +37,45 @@ def _save_cache(cache: dict) -> None:
     CACHE_FILE.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _save_not_found(songs: list[dict]) -> None:
+    write_header = not NOT_FOUND_FILE.exists()
+    with NOT_FOUND_FILE.open("a", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=["searched_at", "title", "artist"])
+        if write_header:
+            writer.writeheader()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        writer.writerows({"searched_at": now, **s} for s in songs)
+    print(f"已記錄到 {NOT_FOUND_FILE}")
+
+
 def search_track(sp: spotipy.Spotify, title: str, artist: str, cache: dict) -> str | None:
     key = f"{title}|{artist}"
     if key in cache:
         return cache[key]  # None means previously confirmed not found
 
-    for attempt in range(3):
+    for retry in range(3):
         try:
             result = sp.search(q=f"track:{title} artist:{artist}", type="track", limit=1, market="TW")
             items = result["tracks"]["items"]
             if items:
                 uri = items[0]["uri"]
                 cache[key] = uri
+                time.sleep(0.1)
                 return uri
 
+            time.sleep(0.1)
             result = sp.search(q=f"{title} {artist}", type="track", limit=1, market="TW")
             items = result["tracks"]["items"]
             uri = items[0]["uri"] if items else None
             cache[key] = uri
+            time.sleep(0.1)
             return uri
 
         except spotipy.SpotifyException as e:
             if e.http_status == 429:
-                wait = int(e.headers.get("Retry-After", 5)) if e.headers else 5
-                print(f"\n  rate limit，等待 {wait} 秒...", flush=True)
+                # Retry-After 優先，否則指數退避 (1s, 2s, 4s)
+                wait = int(e.headers.get("Retry-After", 2 ** retry)) if e.headers else 2 ** retry
+                print(f"\n  rate limit，等待 {wait} 秒... (第 {retry + 1} 次重試)", flush=True)
                 time.sleep(wait + 1)
             else:
                 raise
@@ -81,29 +99,38 @@ def _search_and_add(sp: spotipy.Spotify, playlist_id: str, songs: list[dict]) ->
 
     print(f"\n在 Spotify 搜尋 {len(songs)} 首歌曲（快取命中 {cached_count} 首，需搜尋 {need_search} 首）...")
 
-    uris: list[str] = []
+    uris_batch: list[str] = []
+    total_added = 0
     not_found: list[dict] = []
 
     for i, song in enumerate(songs, 1):
         uri = search_track(sp, song["title"], song["artist"], cache)
         if uri:
-            uris.append(uri)
+            uris_batch.append(uri)
         else:
             not_found.append(song)
+
+        if len(uris_batch) >= 100:
+            sp.playlist_add_items(playlist_id, uris_batch)
+            total_added += len(uris_batch)
+            uris_batch = []
+
         if i % 20 == 0:
             print(f"  {i}/{len(songs)} ...", flush=True)
-            _save_cache(cache)  # 定期存檔，避免中途中斷損失進度
+            _save_cache(cache)
+
+    if uris_batch:
+        sp.playlist_add_items(playlist_id, uris_batch)
+        total_added += len(uris_batch)
 
     _save_cache(cache)
 
-    for i in range(0, len(uris), 100):
-        sp.playlist_add_items(playlist_id, uris[i:i + 100])
-
-    print(f"\n成功加入: {len(uris)} 首")
+    print(f"\n成功加入: {total_added} 首")
     if not_found:
         print(f"找不到 ({len(not_found)} 首):")
         for s in not_found:
             print(f"  - {s['title']} — {s['artist']}")
+        _save_not_found(not_found)
 
     playlist = sp.playlist(playlist_id, fields="external_urls")
     return playlist["external_urls"]["spotify"]

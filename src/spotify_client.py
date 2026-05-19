@@ -92,7 +92,12 @@ def parse_playlist_id(id_or_url: str) -> str:
     return id_or_url
 
 
-def _search_and_add(sp: spotipy.Spotify, playlist_id: str, songs: list[dict]) -> str:
+def _search_and_add(
+    sp: spotipy.Spotify,
+    playlist_id: str,
+    songs: list[dict],
+    on_batch_added: callable = None,
+) -> str:
     cache = _load_cache()
     cached_count = sum(1 for s in songs if f"{s['title']}|{s['artist']}" in cache)
     need_search = len(songs) - cached_count
@@ -114,6 +119,8 @@ def _search_and_add(sp: spotipy.Spotify, playlist_id: str, songs: list[dict]) ->
             sp.playlist_add_items(playlist_id, uris_batch)
             total_added += len(uris_batch)
             uris_batch = []
+            if on_batch_added:
+                on_batch_added(i)
 
         if i % 20 == 0:
             print(f"  {i}/{len(songs)} ...", flush=True)
@@ -122,6 +129,8 @@ def _search_and_add(sp: spotipy.Spotify, playlist_id: str, songs: list[dict]) ->
     if uris_batch:
         sp.playlist_add_items(playlist_id, uris_batch)
         total_added += len(uris_batch)
+        if on_batch_added:
+            on_batch_added(len(songs))
 
     _save_cache(cache)
 
@@ -136,10 +145,14 @@ def _search_and_add(sp: spotipy.Spotify, playlist_id: str, songs: list[dict]) ->
     return playlist["external_urls"]["spotify"]
 
 
-def create_playlist(sp: spotipy.Spotify, name: str, songs: list[dict], public: bool = True) -> str:
+def create_playlist(
+    sp: spotipy.Spotify, name: str, songs: list[dict], public: bool = True, on_batch_added: callable = None
+) -> str:
     playlist = sp._post("me/playlists", payload={"name": name, "public": public})
-    return _search_and_add(sp, playlist["id"], songs)
+    return _search_and_add(sp, playlist["id"], songs, on_batch_added=on_batch_added)
 
 
-def add_to_playlist(sp: spotipy.Spotify, playlist_id_or_url: str, songs: list[dict]) -> str:
-    return _search_and_add(sp, parse_playlist_id(playlist_id_or_url), songs)
+def add_to_playlist(
+    sp: spotipy.Spotify, playlist_id_or_url: str, songs: list[dict], on_batch_added: callable = None
+) -> str:
+    return _search_and_add(sp, parse_playlist_id(playlist_id_or_url), songs, on_batch_added=on_batch_added)

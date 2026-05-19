@@ -25,6 +25,7 @@ load_dotenv()
 
 TODAY = date.today()
 PENDING_FILE = Path(".pending_songs.json")
+CONFIG_FILE = Path(".spotify_config.json")
 
 
 # ── pending file ──────────────────────────────────────────────
@@ -45,6 +46,21 @@ def load_pending() -> tuple[list[dict], dict] | None:
 
 def clear_pending() -> None:
     PENDING_FILE.unlink(missing_ok=True)
+
+
+# ── config ────────────────────────────────────────────────────
+
+def load_default_playlist() -> str | None:
+    if not CONFIG_FILE.exists():
+        return None
+    return json.loads(CONFIG_FILE.read_text(encoding="utf-8")).get("default_playlist_id")
+
+
+def save_default_playlist(playlist_url: str) -> None:
+    CONFIG_FILE.write_text(
+        json.dumps({"default_playlist_id": playlist_url}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 # ── interactive helpers ───────────────────────────────────────
@@ -102,19 +118,21 @@ def ask_time_range() -> tuple[str | None, str | None]:
 
 
 def ask_output(stations: list[str], start: date, end: date) -> dict:
+    default_playlist = load_default_playlist() or os.environ.get("SPOTIFY_PLAYLIST_ID", "")
+
     print("\n輸出方式:")
     print("  1) 加入現有 Spotify 歌單")
     print("  2) 建立新 Spotify 歌單")
     print("  3) 匯出 CSV 檔案")
-    choice = ask("請選擇", "1")
+    default_choice = "1" if default_playlist else "2"
+    choice = ask("請選擇", default_choice)
 
     if choice == "3":
         path = ask("CSV 檔案名稱", "songs.csv")
         return {"mode": "csv", "path": path}
 
     if choice == "1":
-        saved = os.environ.get("SPOTIFY_PLAYLIST_ID", "")
-        playlist_id = ask("歌單網址或 ID", saved)
+        playlist_id = ask("歌單網址或 ID", default_playlist)
         return {"mode": "add", "playlist_id": playlist_id}
 
     station_label = "+".join(stations)
@@ -150,12 +168,22 @@ def get_spotify_client():
 def run_spotify(songs: list[dict], output: dict) -> None:
     from src.spotify_client import add_to_playlist, create_playlist
     sp = get_spotify_client()
+
+    def on_batch_added(processed_count: int) -> None:
+        remaining = songs[processed_count:]
+        if remaining:
+            save_pending(remaining, output)
+        else:
+            clear_pending()
+
     if output["mode"] == "add":
         print("\n連線 Spotify，加入歌單...")
-        url = add_to_playlist(sp, output["playlist_id"], songs)
+        url = add_to_playlist(sp, output["playlist_id"], songs, on_batch_added=on_batch_added)
     else:
         print(f"\n連線 Spotify，建立歌單:「{output['name']}」")
-        url = create_playlist(sp, output["name"], songs, public=output["public"])
+        url = create_playlist(sp, output["name"], songs, public=output["public"], on_batch_added=on_batch_added)
+        save_default_playlist(url)
+        print(f"已儲存歌單，之後預設加入此歌單。")
     clear_pending()
     print(f"\n完成: {url}")
 
@@ -209,12 +237,16 @@ def main() -> None:
         elif args.playlist_id:
             output = {"mode": "add", "playlist_id": args.playlist_id}
         else:
-            station_label = "+".join(stations)
-            output = {
-                "mode": "spotify",
-                "name": args.playlist_name or f"Asia FM ({station_label}) {start}~{end}",
-                "public": not args.private,
-            }
+            default_playlist = load_default_playlist() or os.environ.get("SPOTIFY_PLAYLIST_ID", "")
+            if default_playlist and not args.playlist_name:
+                output = {"mode": "add", "playlist_id": default_playlist}
+            else:
+                station_label = "+".join(stations)
+                output = {
+                    "mode": "spotify",
+                    "name": args.playlist_name or f"Asia FM ({station_label}) {start}~{end}",
+                    "public": not args.private,
+                }
 
     print()
     songs = scrape(stations, start, end, time_start=time_start, time_end=time_end)

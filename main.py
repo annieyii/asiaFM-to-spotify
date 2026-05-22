@@ -89,8 +89,7 @@ def ask_stations() -> list[str]:
 
 
 def ask_dates() -> tuple[date, date]:
-    default_start = (TODAY - timedelta(days=6)).strftime("%Y-%m-%d")
-    default_end = TODAY.strftime("%Y-%m-%d")
+    default_start = TODAY.strftime("%Y-%m-%d")
 
     print("\n日期範圍:")
     while True:
@@ -101,7 +100,7 @@ def ask_dates() -> tuple[date, date]:
             print("  格式錯誤，請重新輸入")
     while True:
         try:
-            end = parse_date(ask("結束日期 (YYYY-MM-DD)", default_end))
+            end = parse_date(ask("結束日期 (YYYY-MM-DD)", start.strftime("%Y-%m-%d")))
             if end >= start:
                 break
             print("  結束日期不能早於開始日期")

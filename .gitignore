@@ -9,11 +9,15 @@ wheels/
 # Virtual environments
 .venv
 
-# Secrets
+# Secrets & personal config
 .env
 .spotify_cache
+.spotify_config.json
 .song_cache.json
 .pending_songs.json
+
+# Generated output
+not_found_songs.csv
 
 # Claude files
 .claude

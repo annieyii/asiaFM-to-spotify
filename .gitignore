@@ -19,5 +19,12 @@ wheels/
 # Generated output
 not_found_songs.csv
 
+# Tests (local only)
+tests/
+
+# Streamlit local config
+.streamlit/
+
 # Claude files
 .claude
+CLAUDE.md

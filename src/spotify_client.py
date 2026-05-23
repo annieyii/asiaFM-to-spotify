@@ -48,7 +48,7 @@ def _save_not_found(songs: list[dict]) -> None:
     print(f"已記錄到 {NOT_FOUND_FILE}")
 
 
-def search_track(sp: spotipy.Spotify, title: str, artist: str, cache: dict) -> str | None:
+def search_track(sp: spotipy.Spotify, title: str, artist: str, cache: dict, log: callable = print) -> str | None:
     key = f"{title}|{artist}"
     if key in cache:
         return cache[key]  # None means previously confirmed not found
@@ -75,7 +75,7 @@ def search_track(sp: spotipy.Spotify, title: str, artist: str, cache: dict) -> s
             if e.http_status == 429:
                 # Retry-After 優先，否則指數退避 (1s, 2s, 4s)
                 wait = int(e.headers.get("Retry-After", 2 ** retry)) if e.headers else 2 ** retry
-                print(f"\n  rate limit，等待 {wait} 秒... (第 {retry + 1} 次重試)", flush=True)
+                log(f"  rate limit，等待 {wait} 秒... (第 {retry + 1} 次重試)")
                 time.sleep(wait + 1)
             else:
                 raise
@@ -97,19 +97,20 @@ def _search_and_add(
     playlist_id: str,
     songs: list[dict],
     on_batch_added: callable = None,
+    log: callable = print,
 ) -> str:
     cache = _load_cache()
     cached_count = sum(1 for s in songs if f"{s['title']}|{s['artist']}" in cache)
     need_search = len(songs) - cached_count
 
-    print(f"\n在 Spotify 搜尋 {len(songs)} 首歌曲（快取命中 {cached_count} 首，需搜尋 {need_search} 首）...")
+    log(f"在 Spotify 搜尋 {len(songs)} 首歌曲（快取命中 {cached_count} 首，需搜尋 {need_search} 首）...")
 
     uris_batch: list[str] = []
     total_added = 0
     not_found: list[dict] = []
 
     for i, song in enumerate(songs, 1):
-        uri = search_track(sp, song["title"], song["artist"], cache)
+        uri = search_track(sp, song["title"], song["artist"], cache, log=log)
         if uri:
             uris_batch.append(uri)
         else:
@@ -123,7 +124,7 @@ def _search_and_add(
                 on_batch_added(i)
 
         if i % 20 == 0:
-            print(f"  {i}/{len(songs)} ...", flush=True)
+            log(f"  {i}/{len(songs)} ...")
             _save_cache(cache)
 
     if uris_batch:
@@ -134,11 +135,11 @@ def _search_and_add(
 
     _save_cache(cache)
 
-    print(f"\n成功加入: {total_added} 首")
+    log(f"成功加入: {total_added} 首")
     if not_found:
-        print(f"找不到 ({len(not_found)} 首):")
+        log(f"找不到 ({len(not_found)} 首):")
         for s in not_found:
-            print(f"  - {s['title']} — {s['artist']}")
+            log(f"  - {s['title']} — {s['artist']}")
         _save_not_found(not_found)
 
     playlist = sp.playlist(playlist_id, fields="external_urls")
@@ -146,13 +147,13 @@ def _search_and_add(
 
 
 def create_playlist(
-    sp: spotipy.Spotify, name: str, songs: list[dict], public: bool = True, on_batch_added: callable = None
+    sp: spotipy.Spotify, name: str, songs: list[dict], public: bool = True, on_batch_added: callable = None, log: callable = print
 ) -> str:
     playlist = sp._post("me/playlists", payload={"name": name, "public": public})
-    return _search_and_add(sp, playlist["id"], songs, on_batch_added=on_batch_added)
+    return _search_and_add(sp, playlist["id"], songs, on_batch_added=on_batch_added, log=log)
 
 
 def add_to_playlist(
-    sp: spotipy.Spotify, playlist_id_or_url: str, songs: list[dict], on_batch_added: callable = None
+    sp: spotipy.Spotify, playlist_id_or_url: str, songs: list[dict], on_batch_added: callable = None, log: callable = print
 ) -> str:
-    return _search_and_add(sp, parse_playlist_id(playlist_id_or_url), songs, on_batch_added=on_batch_added)
+    return _search_and_add(sp, parse_playlist_id(playlist_id_or_url), songs, on_batch_added=on_batch_added, log=log)

@@ -38,7 +38,15 @@ SPOTIFY_PLAYLIST_ID=https://open.spotify.com/playlist/...
 
 ## 使用
 
-### 互動模式（推薦）
+### Web UI
+
+```bash
+uv run streamlit run app.py
+```
+
+瀏覽器開啟後，選擇電台、日期、輸出方式，按「開始抓取」即可。
+
+### Terminal 互動模式
 
 ```bash
 uv run main.py
@@ -56,8 +64,8 @@ uv run main.py
 請選擇 [3]:
 
 日期範圍:
-開始日期 (YYYY-MM-DD) [2026-05-11]:
-結束日期 (YYYY-MM-DD) [2026-05-17]:
+開始日期 (YYYY-MM-DD) [2026-05-22]:
+結束日期 (YYYY-MM-DD) [2026-05-22]:
 
 時間範圍（直接 Enter 代表全天）:
 開始時間 HH:MM:
@@ -109,11 +117,12 @@ uv run main.py --start 2026-05-17 --export songs.csv
 
 ```
 asiaFM-to-spotify/
-├── main.py                  # 入口，互動問答與 CLI flag 處理
+├── main.py                  # CLI 入口，互動問答與 flag 處理
+├── app.py                   # Streamlit web UI
 ├── src/
 │   ├── scraper.py           # 向亞洲電台 AJAX endpoint 抓取歌單
 │   └── spotify_client.py    # Spotify OAuth、搜尋、建立/加入歌單
-├── .env                     # 你的憑證
+├── .env                     # 你的憑證（不進版控）
 └── .env.example             # 憑證範本
 ```
 

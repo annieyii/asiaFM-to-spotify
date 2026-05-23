@@ -36,7 +36,7 @@ def date_range(start: date, end: date) -> Iterator[date]:
         d += timedelta(days=1)
 
 
-def fetch_slot(radio_type: str, search_date: str, interval: str) -> list[dict]:
+def fetch_slot(radio_type: str, search_date: str, interval: str, log: callable = print) -> list[dict]:
     try:
         resp = requests.post(
             AJAX_URL,
@@ -52,8 +52,10 @@ def fetch_slot(radio_type: str, search_date: str, interval: str) -> list[dict]:
         data = resp.json()
         if data.get("status") == 1:
             return data["html"]
+        msg = data.get("message") or data.get("msg") or f"status={data.get('status')}"
+        log(f"  警告: {search_date} {interval} — {msg}")
     except Exception as e:
-        print(f"  警告: 無法取得 {search_date} {interval} — {e}")
+        log(f"  警告: 無法取得 {search_date} {interval} — {e}")
     return []
 
 
@@ -85,6 +87,7 @@ def scrape(
     time_start: str | None = None,
     time_end: str | None = None,
     delay: float = 0.3,
+    log: callable = print,
 ) -> list[dict]:
     """
     Scrape songs for given station keys ('asia', 'pacific') and date range.
@@ -100,21 +103,20 @@ def scrape(
     for station_key in stations:
         radio_type = STATIONS[station_key]
         station_name = "亞洲FM92.7" if station_key == "asia" else "亞太FM92.3"
-        print(f"\n[{station_name}{time_label}]")
+        log(f"[{station_name}{time_label}]")
 
         for d in date_range(start, end):
             date_str = d.strftime("%Y-%m-%d")
-            print(f"  {date_str} ...", end=" ", flush=True)
             count = 0
             for slot in slots:
-                for song in fetch_slot(radio_type, date_str, slot):
+                for song in fetch_slot(radio_type, date_str, slot, log=log):
                     key = (song["title"].strip(), song["artist"].strip())
                     if key not in seen:
                         seen.add(key)
                         songs.append({"title": key[0], "artist": key[1]})
                         count += 1
                 time.sleep(delay)
-            print(f"+{count} 首")
+            log(f"  {date_str}: +{count} 首")
 
-    print(f"\n共抓取 {len(songs)} 首不重複歌曲")
+    log(f"共抓取 {len(songs)} 首不重複歌曲")
     return songs
